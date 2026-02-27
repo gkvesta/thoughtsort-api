@@ -259,3 +259,80 @@ INBOX TO SORT:
     except Exception as e:
         log.error(f"Failed to parse Gemini response: {e}\nRaw: {raw[:500]}")
         raise HTTPException(status_code=500, detail=f"Gemini response parse error: {e}")
+
+
+
+
+
+class AnnotateRequest(BaseModel):
+    text: str
+    known_tags: list[str] = []
+
+class AmalgamateRequest(BaseModel):
+    tag: str
+    notes: list[str]
+    known_tags: list[str] = []
+
+@app.post("/annotate")
+async def annotate_note(body: AnnotateRequest, uid: str = Depends(get_user_id)):
+    """Annotate a single note — return tags and aiNote."""
+    known_tags_str = ""
+    if body.known_tags:
+        known_tags_str = f"KNOWN TAGS (prefer these): {', '.join('#' + t for t in body.known_tags)}\n"
+
+    prompt = f"""You are a personal thought organizer. Analyze this note and return a JSON object only.
+
+{known_tags_str}
+RULES:
+- Assign 1-4 tags. Use known tags when possible. Create new ones (lowercase-hyphenated) only if nothing fits.
+- Write a 1-2 sentence aiNote adding context or connecting themes.
+- Tags should NOT have # prefix in JSON.
+
+Return ONLY valid JSON with exactly these fields:
+{{"tags": ["tag1", "tag2"], "aiNote": "..."}}
+
+NOTE TO ANALYZE:
+{body.text}"""
+
+    model = genai.GenerativeModel(GEMINI_MODEL)
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=512)
+    )
+    raw = response.text.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    try:
+        result = json.loads(raw)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Parse error: {e}")
+
+
+@app.post("/amalgamate")
+async def amalgamate(body: AmalgamateRequest, uid: str = Depends(get_user_id)):
+    """Synthesize all notes in a tag into a single summary."""
+    notes_text = "\n\n---\n\n".join(body.notes)
+    known_tags_str = ""
+    if body.known_tags:
+        known_tags_str = f"KNOWN TAGS: {', '.join('#' + t for t in body.known_tags)}\n"
+
+    prompt = f"""You are synthesizing a person's thoughts on the topic "#{body.tag}".
+
+{known_tags_str}
+Read all the notes below and write a clear, coherent synthesis that:
+- Identifies the main themes and recurring ideas
+- Notes any contradictions or evolution of thinking
+- Highlights any actionable insights or decisions
+- Is written in second person ("You seem to be thinking about...")
+- Is 2-4 paragraphs long
+
+NOTES:
+{notes_text}"""
+
+    model = genai.GenerativeModel(GEMINI_MODEL)
+    response = model.generate_content(
+        prompt,
+        generation_config=genai.GenerationConfig(temperature=0.4, max_output_tokens=1024)
+    )
+    return {"summary": response.text.strip()}
