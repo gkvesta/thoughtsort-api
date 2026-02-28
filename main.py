@@ -89,12 +89,17 @@ async def annotate_note(body: AnnotateRequest, uid: str = Depends(get_user_id)):
         known_tags_str = f"KNOWN TAGS (prefer these): {', '.join('#' + t for t in body.known_tags)}\n\n"
 
     prompt = (
-        f"Tag this personal note with 1-4 topic tags.\n\n"
+        f"Analyze this personal note and return a JSON object with two fields: 'tags' and 'title'.\n\n"
         f"{known_tags_str}"
         f"RULES:\n"
-        f"- Prefer known tags. Only create new tags (lowercase, hyphens) if nothing fits.\n"
-        f"- No # prefix. Reflect the actual topic, not generic words like 'note' or 'text'.\n"
-        f"- Return a JSON object with a single 'tags' array of strings.\n\n"
+        f"- tags: 1-4 strings. Name a topic, project, or domain. "
+        f"Specific enough to group related notes, broad enough to apply to more than one. "
+        f"Good: 'sleep', 'work-stress', 'recipe-ideas'. Bad: 'thought', 'note', 'life', 'thing'. "
+        f"No # prefix.\n"
+        f"- title: a short, descriptive title (4-8 words) for this note. "
+        f"Like a newspaper headline — specific, not generic. "
+        f"If the note is already titled or is very short, an empty string is fine.\n"
+        f"- Prefer known tags. Create new ones (lowercase, hyphens) only if nothing fits.\n\n"
         f"NOTE: {body.text}"
     )
 
@@ -116,7 +121,10 @@ async def annotate_note(body: AnnotateRequest, uid: str = Depends(get_user_id)):
         if not isinstance(tags, list):
             tags = []
         tags = [str(t).lower().strip().lstrip("#") for t in tags if t]
-        return {"tags": tags, "aiNote": ""}
+        title = result.get("title", "")
+        if not isinstance(title, str):
+            title = ""
+        return {"tags": tags, "title": title.strip(), "aiNote": ""}
     except Exception as e:
         log.error(f"annotate error: {e}")
         raise HTTPException(status_code=500, detail=f"Parse error: {e}")
@@ -131,17 +139,25 @@ async def amalgamate(body: AmalgamateRequest, uid: str = Depends(get_user_id)):
     if body.known_tags:
         known_tags_str = f"KNOWN TAGS: {', '.join('#' + t for t in body.known_tags)}\n\n"
 
-    prompt = f"""You are synthesizing a person's thoughts on the topic "#{body.tag}".
-
-{known_tags_str}Read all the notes below and write a clear, coherent synthesis that:
-- Identifies the main themes and recurring ideas
-- Notes any contradictions or evolution of thinking
-- Highlights any actionable insights or decisions
-- Is written in second person ("You seem to be thinking about...")
-- Is 2-4 paragraphs long
-
-NOTES:
-{notes_text}"""
+    prompt = (
+        f"You are an archivist summarizing a collection of personal notes on the topic '#{body.tag}'.\n\n"
+        f"{known_tags_str}"
+        f"Write a 2-4 paragraph synthesis in an observational, third-person voice — "
+        f"as if describing what a reader would find in these notes. "
+        f"Do not address the author directly. Do not give advice.\n\n"
+        f"Good voice examples:\n"
+        f"- 'The notes suggest a recurring preoccupation with...'\n"
+        f"- 'A tension emerges between X and Y across several entries...'\n"
+        f"- 'The thinking here appears to shift over time toward...'\n"
+        f"- 'There is no clear resolution, but the entries circle back repeatedly to...'\n\n"
+        f"Cover:\n"
+        f"- The main themes and what recurs\n"
+        f"- Any contradictions or shifts in thinking\n"
+        f"- What seems unresolved or still open\n"
+        f"- Any concrete ideas or directions that emerge\n\n"
+        f"Write in plain prose. No bullet points. No headers.\n\n"
+        f"NOTES:\n{notes_text}"
+    )
 
     model = genai.GenerativeModel(GEMINI_MODEL)
     try:
