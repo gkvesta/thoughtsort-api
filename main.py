@@ -33,7 +33,7 @@ db = firestore.client()
 
 # ── GEMINI INIT ───────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL   = "gemini-2.5-flash"
+GEMINI_MODEL   = "gemini-1.5-flash"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ── FASTAPI APP ───────────────────────────────────────────────
@@ -110,13 +110,27 @@ async def annotate_note(body: AnnotateRequest, uid: str = Depends(get_user_id)):
             generation_config=genai.GenerationConfig(
                 temperature=0.2,
                 max_output_tokens=256,
-                response_mime_type="application/json"
             )
         )
+
+        # Safety block check
+        if not response.candidates or not response.candidates[0].content.parts:
+            log.warning(f"annotate: safety block or empty candidate for text: {body.text[:60]}")
+            raise HTTPException(status_code=500, detail="Parse error: safety block or empty response")
+
         raw = response.text.strip()
         log.info(f"annotate raw response: {raw[:200]}")
+
+        # Strip markdown fences if present
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        raw = raw.strip()
+
+        # Fix single-quoted JSON (Gemini sometimes returns Python dict syntax)
+        if raw.startswith("'") or ("': " in raw and not ('": ' in raw)):
+            raw = raw.replace("'", '"')
+
         result = json.loads(raw)
-        # Normalise — ensure tags is a list of strings
         tags = result.get("tags", [])
         if not isinstance(tags, list):
             tags = []
@@ -125,6 +139,8 @@ async def annotate_note(body: AnnotateRequest, uid: str = Depends(get_user_id)):
         if not isinstance(title, str):
             title = ""
         return {"tags": tags, "title": title.strip(), "aiNote": ""}
+    except HTTPException:
+        raise
     except Exception as e:
         log.error(f"annotate error: {e}")
         raise HTTPException(status_code=500, detail=f"Parse error: {e}")
