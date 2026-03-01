@@ -109,7 +109,7 @@ async def annotate_note(body: AnnotateRequest, uid: str = Depends(get_user_id)):
             prompt,
             generation_config=genai.GenerationConfig(
                 temperature=0.2,
-                max_output_tokens=256,
+                max_output_tokens=1024,
             )
         )
 
@@ -119,7 +119,7 @@ async def annotate_note(body: AnnotateRequest, uid: str = Depends(get_user_id)):
             raise HTTPException(status_code=500, detail="Parse error: safety block or empty response")
 
         raw = response.text.strip()
-        log.info(f"annotate raw response: {raw[:200]}")
+        log.info(f"annotate raw response: {repr(raw[:500])}")
 
         # Strip markdown fences if present
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
