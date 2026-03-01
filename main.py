@@ -33,7 +33,7 @@ db = firestore.client()
 
 # ── GEMINI INIT ───────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL   = "gemini-1.5-flash"
+GEMINI_MODEL   = "gemini-2.5-flash"
 genai.configure(api_key=GEMINI_API_KEY)
 
 # ── FASTAPI APP ───────────────────────────────────────────────
